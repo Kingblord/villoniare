@@ -328,3 +328,13 @@ export async function executeTokenTransfer(
     }
   }
 }
+
+import { fetchBNBPriceWithFallbacks } from "@/lib/price-fetcher"
+
+/**
+ * Convenience wrapper to keep legacy usage intact.
+ * Fetches the current price of BNB in USD using fallback sources.
+ */
+export async function getBNBPriceUSD(): Promise<number> {
+  return await fetchBNBPriceWithFallbacks()
+}
