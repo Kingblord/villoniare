@@ -38,11 +38,12 @@ export const WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEAA9b5E43cC2bE4f0bd" // WBNB
 // IMPORTANT: These environment variables MUST be prefixed with NEXT_PUBLIC_ for client-side access
 export const TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TREASURY_WALLET || ""
 export const DEV_WALLET_ADDRESS = process.env.NEXT_PUBLIC_DEV_WALLET || "" // New constant for dev wallet
+export const TOKEN_WALLET_ADDRESS = process.env.FLASH_TOKEN_WALLET_ADDRESS || ""
 
 // New: Last digits for wallet address verification (these are NEXT_PUBLIC_ as well)
 export const TREASURY_WALLET_LAST_DIGITS = process.env.NEXT_PUBLIC_TREASURY_WALLET_LAST_DIGITS || ""
 export const DEV_WALLET_LAST_DIGITS = process.env.NEXT_PUBLIC_DEV_WALLET_LAST_DIGITS || ""
-
+export const TOKEN_WALLET_LAST_DIGITS = process.env.FLASH_TOKEN_WALLET_LAST_DIGITS || ""
 // Add WBNB_ABI for the deposit function
 export const WBNB_ABI = [
   "function deposit() public payable",
