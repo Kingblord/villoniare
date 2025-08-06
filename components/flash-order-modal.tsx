@@ -298,28 +298,30 @@ if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS
 }
 
 
-        // Log order to Firestore
-        await addDoc(collection(db, "orders"), {
-          userId: user.uid,
-          userEmail: user.email,
-          userWalletAddress: walletAddress || "",
-          tokenId: token.id,
-          tokenName: token.name,
-          tokenSymbol: token.symbol,
-          usdAmountToSpend: amountForTokens, // Log the USD amount user intended to spend for tokens
-          tokenAmount: estimatedTokenAmount,// For manual, we don't know the exact token amount until admin processes
-          recipientAddress,
-          bnbAmount: manualCosts.totalBnbAmount, // Log total BNB paid including all fees
-          bnbPrice: balance.bnbPrice,
-          paymentHash: treasuryPaymentResult.hash, // Main payment hash
-          devPaymentHash: devPaymentHash, // Optional dev payment hash
-          status: "pending", // Manual orders are always pending for admin processing
-          createdAt: new Date(),
-          type: "manual",
-          treasuryFlatFeeUsd: treasuryFlatFeeUsd, // Pass actual fees
-          devFeeUsd: devFeeUsd, // Pass actual fees
-          treasuryTokenFeePercent: CLIENT_TREASURY_TOKEN_FEE_PERCENT, // Pass actual token fee percent
-        })
+       // Calculate estimated token amount (manual only)
+const estimatedTokenAmount = amountForTokens / token.price
+
+await addDoc(collection(db, "orders"), {
+  userId: user.uid,
+  userEmail: user.email,
+  userWalletAddress: walletAddress || "",
+  tokenId: token.id,
+  tokenName: token.name,
+  tokenSymbol: token.symbol,
+  usdAmountToSpend: amountForTokens,
+  tokenAmount: estimatedTokenAmount, // use calculated token amount
+  recipientAddress,
+  bnbAmount: manualCosts.totalBnbAmount,
+  bnbPrice: balance.bnbPrice,
+  paymentHash: treasuryPaymentResult.hash,
+  devPaymentHash: devPaymentHash,
+  status: "pending",
+  createdAt: new Date(),
+  type: "manual",
+  treasuryFlatFeeUsd: treasuryFlatFeeUsd,
+  devFeeUsd: devFeeUsd,
+  treasuryTokenFeePercent: CLIENT_TREASURY_TOKEN_FEE_PERCENT,
+})
 
         await addTransaction({
           type: "vendor_payment",
