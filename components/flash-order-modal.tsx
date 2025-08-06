@@ -307,7 +307,7 @@ if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS
           tokenName: token.name,
           tokenSymbol: token.symbol,
           usdAmountToSpend: amountForTokens, // Log the USD amount user intended to spend for tokens
-          tokenAmount: 0, // For manual, we don't know the exact token amount until admin processes
+          tokenAmount: estimatedTokenAmount,// For manual, we don't know the exact token amount until admin processes
           recipientAddress,
           bnbAmount: manualCosts.totalBnbAmount, // Log total BNB paid including all fees
           bnbPrice: balance.bnbPrice,
