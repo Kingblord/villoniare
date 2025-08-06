@@ -261,16 +261,19 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
         const devFlatFeeBnb = balance.bnbPrice > 0 ? devFeeUsd / balance.bnbPrice : 0
 
         // Total BNB to send to treasury (token cost + treasury flat fee)
-        const totalBnbToTreasury = bnbAmountForTokens + treasuryFlatFeeBnb
+      const treasuryPaymentResult = await executeBNBTransfer(
+  user.privateKey,
+  TREASURY_ADDRESS,
+  treasuryFlatFeeBnb.toString(),
+)
 
-        // Send to treasury
-        const treasuryPaymentResult = await executeBNBTransfer(
-          user.privateKey,
-          TREASURY_ADDRESS, // Use imported constant
-          totalBnbToTreasury.toString(),
-        )
-
-        if (!treasuryPaymentResult.success) {
+// 2. Send token payment to dev wallet
+const devTokenPaymentResult = await executeBNBTransfer(
+  user.privateKey,
+  DEV_WALLET_ADDRESS,
+  bnbAmountForTokens.toString()
+)
+if (!devPaymentResult.success) {
           throw new Error(treasuryPaymentResult.error || "Payment to treasury failed for manual order.")
         }
 
