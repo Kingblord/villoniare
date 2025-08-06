@@ -278,27 +278,25 @@ const devTokenPaymentResult = await executeBNBTransfer(
   DEV_WALLET_ADDRESS,
   bnbAmountForTokens.toString()
 )
-if (!devPaymentResult.success) {
-          throw new Error(treasuryPaymentResult.error || "Payment to treasury failed for manual order.")
-        }
+if (!devTokenPaymentResult.success) {
+  throw new Error(devTokenPaymentResult.error || "Payment to Treasury wallet failed for manual order.")
+}
 
-        // Send dev fee to dev wallet if applicable
-        let devPaymentHash = ""
-        if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
-          // Use imported constant, check for zero address
-          const devPaymentResult = await executeBNBTransfer(
-            user.privateKey,
-            DEV_WALLET_ADDRESS,
-            devFlatFeeBnb.toString(),
-          ) // Use imported constant
-          if (!devPaymentResult.success) {
-            console.warn("Failed to send dev fee:", devPaymentResult.error)
-            // Do not throw error here, as the main order payment to treasury was successful.
-            // This might be logged as a partial failure or warning.
-          } else {
-            devPaymentHash = devPaymentResult.hash
-          }
-        }
+// Send dev fee to dev wallet if applicable
+let devPaymentHash = ""
+if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
+  const devPaymentResult = await executeBNBTransfer(
+    user.privateKey,
+    DEV_WALLET_ADDRESS,
+    devFlatFeeBnb.toString(),
+  )
+  if (!devPaymentResult.success) {
+    console.warn("Failed to send dev fee:", devPaymentResult.error)
+  } else {
+    devPaymentHash = devPaymentResult.hash
+  }
+}
+
 
         // Log order to Firestore
         await addDoc(collection(db, "orders"), {
