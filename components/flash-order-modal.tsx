@@ -62,8 +62,8 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
   const wbnbToken = tokens.find((token) => token.contractAddress?.toLowerCase() === WBNB_ADDRESS.toLowerCase())
 
   // Read fees from environment variables for client-side display and manual calculations
- const TREASURY_FLAT_FEE_USD = 0.01
-const DEV_AUTO_FEE_USD = 0.01
+ const TREASURY_FLAT_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_FLAT_FEE_USD || "0")
+const DEV_AUTO_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_DEV_AUTO_FEE_USD || "0")
   const CLIENT_TREASURY_TOKEN_FEE_PERCENT = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_TOKEN_FEE_PERCENT || "0")
 
   // Public wallet addresses (client-side safe) - now imported from lib/web3.ts
