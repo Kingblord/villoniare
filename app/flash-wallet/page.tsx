@@ -25,7 +25,6 @@ import { useWallet } from "@/lib/use-wallet"
 import { formatCurrency, formatTokenAmount, truncateAddress } from "@/lib/utils"
 import Link from "next/link"
 import { ImportTokenModal } from "@/components/import-token-modal"
-import { WBNB_ADDRESS } from "@/lib/web3"
 import { useAuth } from "@/lib/auth-context"
 
 // Local helper ─ determines the text color for a transaction amount
@@ -57,9 +56,6 @@ export default function FlashWalletPage() {
     useWallet()
   const [showImportTokenModal, setShowImportTokenModal] = useState(false)
   const hasNativeBNB = balance.bnb > 0.001
-  const wbnbToken = tokens.find((token) => token.contractAddress?.toLowerCase() === WBNB_ADDRESS.toLowerCase())
-  const hasWBNB = (wbnbToken?.balance || 0) > 0.001
-
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
@@ -122,13 +118,9 @@ export default function FlashWalletPage() {
     )
   }
 
-  const tokensToDisplay = tokens.filter(
-    (token) =>
-      token.balance > 0 ||
-      token.isImported ||
-      token.type === "manual" ||
-      token.contractAddress?.toLowerCase() === WBNB_ADDRESS.toLowerCase(),
-  )
+ const tokensToDisplay = tokens.filter(
+  (token) => token.balance > 0 || token.isImported || token.type === "manual"
+)
 
   return (
     <AuthGuard requirePin={true}>
@@ -182,9 +174,11 @@ export default function FlashWalletPage() {
             <CardContent>
               <div className="text-3xl font-bold text-white mb-2">{formatCurrency(balance.totalUsd)}</div>
               <div className="text-slate-300 space-y-1">
-                {hasWBNB && <div>{formatTokenAmount(wbnbToken.balance)} WBNB</div>}
-                {hasNativeBNB && <div>{formatTokenAmount(balance.bnb)} BNB (Native)</div>}
-                {!hasWBNB && !hasNativeBNB && <div>0 BNB</div>}
+               {hasNativeBNB ? (
+  <div>{formatTokenAmount(balance.bnb)} BNB</div>
+) : (
+  <div>0 BNB</div>
+)}
               </div>
               {balance.bnbPrice > 0 && (
                 <div className="text-sm text-slate-400">BNB Price: {formatCurrency(balance.bnbPrice)}</div>
