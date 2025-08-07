@@ -648,24 +648,22 @@ await addDoc(collection(db, "orders"), {
                 <Calculator className="w-4 h-4 text-amber-400" />
                 <span className="font-medium text-white">Cost Summary</span>
               </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between font-semibold">
-                  <span className="text-slate-300">Total Cost (USD):</span>
-                  <span className="text-white">{formatCurrency(totalUsdCostDisplay)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">
-                    {token.type === "auto" ? "Total BNB Required:" : "Total BNB Payment:"}
-                  </span>
-                  <span className="text-white">
-                    {isFetchingQuote ? (
-                      <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" />
-                    ) : (
-                      formatTokenAmount(totalBnbRequiredDisplay)
-                    )}{" "}
-                    BNB
-                  </span>
-                </div>
+             <div className="space-y-2 text-sm">
+  <div className="flex justify-between font-semibold">
+    <span className="text-slate-300">Total Cost (USD):</span>
+    <span className="text-white">{formatCurrency(totalUsdCostDisplay)}</span>
+  </div>
+  <div className="flex justify-between">
+    <span className="text-slate-400">Total BNB Payment:</span>
+    <span className="text-white">
+      {isFetchingQuote ? (
+        <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" />
+      ) : (
+        formatTokenAmount(totalBnbRequiredDisplay)
+      )}{" "}
+      BNB
+    </span>
+  </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Your Native BNB Balance:</span>
                   <span
