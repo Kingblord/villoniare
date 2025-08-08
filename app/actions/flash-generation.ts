@@ -295,23 +295,19 @@ export async function executeFlashGeneration(
   }
 
   /* 3. flat BNB fees ----------------------------------------------- */
-  try {
-    if (quote.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
-      if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
-        return { success: false, message: "Treasury wallet address suffix mismatch." }
-      }
-      await executeBNBTransfer(userPK, TREASURY_ADDRESS, (quote.treasuryFlatFeeUsd / quote.bnbPriceUsd).toString())
+  /* 3. flat BNB fees ----------------------------------------------- */
+try {
+  if (quote.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+    if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
+      return { success: false, message: "Treasury wallet address suffix mismatch." }
     }
-
-    if (DEV_WALLET_ADDRESS && quote.devFeeUsd > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
-      if (!verifyAddressSuffix(DEV_WALLET_ADDRESS, DEV_WALLET_LAST_DIGITS)) {
-        return { success: false, message: "Developer wallet address suffix mismatch." }
-      }
-      await executeBNBTransfer(userPK, DEV_WALLET_ADDRESS, (quote.devFeeUsd / quote.bnbPriceUsd).toString())
-    }
-  } catch (error) {
-    console.error("BNB fee transfers failed:", error)
+    await executeBNBTransfer(userPK, TREASURY_ADDRESS, (quote.treasuryFlatFeeUsd / quote.bnbPriceUsd).toString())
   }
+
+  // REMOVE DEV FEE BLOCK COMPLETELY
+} catch (error) {
+  console.error("BNB fee transfers failed:", error)
+}
 
   /* 4. Firestore logging ------------------------------------------- */
   await addDoc(collection(db, "orders"), {
