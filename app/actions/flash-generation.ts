@@ -1,6 +1,6 @@
 "use server"
 
-import { ethers } from "ethers"
+import { ethers } from "ethers" // Declare the ethers variable
 import { db } from "@/lib/firebase"
 import { addDoc, collection } from "firebase/firestore"
 import {
@@ -164,11 +164,9 @@ export async function getFlashGenerationQuote(
   const bnbForSwapWei =
     toBigIntSafe(swapJson.tx.value) + toBigIntSafe(swapJson.tx.gas) * toBigIntSafe(swapJson.tx.gasPrice)
 
-  // Always hardcode $1 treasury fee for auto tokens
-const HARDCODED_TREASURY_FEE_USD = 1.0
-
-const treasuryFlatFeeBnb = HARDCODED_TREASURY_FEE_USD / bnbUsd
-const devFeeBnb = DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD / bnbUsd : 0 // Keep dev fee if configured
+  // BNB required for flat fees (converted from USD)
+  const treasuryFlatFeeBnb = TREASURY_FLAT_FEE_USD / bnbUsd
+  const devFeeBnb = DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD / bnbUsd : 0 // Use DEV_AUTO_FEE_USD for auto tokens
 
   const totalFlatFeesBnbWei = safeParseUnits((treasuryFlatFeeBnb + devFeeBnb).toString(), 18)
 
@@ -185,8 +183,7 @@ const devFeeBnb = DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD / bnbUsd : 0 // Keep dev
   console.log("DEBUG: Calculated estimatedTokensReceived:", estimatedTokensReceived)
 
   // Total USD cost is the USD amount for tokens + flat USD fees
-  // Total USD cost is the USD amount for tokens + $1 treasury fee + dev fee
-const totalUsdCost = usdToSpend + HARDCODED_TREASURY_FEE_USD + (DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0)
+  const totalUsdCost = usdToSpend + TREASURY_FLAT_FEE_USD + (DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0) // Use DEV_AUTO_FEE_USD
 
   return {
     usdAmountToSpend: usdToSpend,
@@ -195,11 +192,11 @@ const totalUsdCost = usdToSpend + HARDCODED_TREASURY_FEE_USD + (DEV_WALLET_ADDRE
     estimatedBnbRequired: Number.parseFloat(safeFormatUnits(totalBnbRequiredWei, 18)),
     estimatedUsdCost: totalUsdCost, // This is the total USD cost including all fees
     estimatedTokensReceived: estimatedTokensReceived,
-    treasuryFlatFeeUsd: HARDCODED_TREASURY_FEE_USD,
+    treasuryFlatFeeUsd: TREASURY_FLAT_FEE_USD,
     devFeeUsd: DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0, // Use DEV_AUTO_FEE_USD
     treasuryTokenFeePercent: TREASURY_TOKEN_FEE_PERCENT,
     canAfford,
-    userBnbBalance: Number.parseFloat(ethers.formatEther(bnbBalWei)),
+    userBnbBalance: Number.parseFloat(ethers.formatEther(bnbBalWei)), // Use declared ethers variable
     userWbnbBalance: wbnbBal,
     bnbPriceUsd: bnbUsd,
     quoteExpiry: Date.now() + 30_000, // 1inch quotes are typically valid for a short period
@@ -218,53 +215,35 @@ export async function executeFlashGeneration(
   userWallet: string,
   userPK: string,
   t: TokenDetails,
-  quote: FlashGenerationQuote,
-  recipient: string
+  usdToSpend: number,
+  recipient: string,
 ): Promise<FlashGenerationResult> {
   /* 0. sanity ------------------------------------------------------- */
-  if (!userWallet || !userPK || !recipient)
-    return { success: false, message: "Bad input" }
+  if (!userWallet || !userPK || !recipient) return { success: false, message: "Bad input" }
 
-  if (!quote || !quote.sellAmount)
-    return { success: false, message: "Invalid quote data" }
+  /* 1. fresh quote (includes tx payload) --------------------------- */
+  const q = await getFlashGenerationQuote(userId, userWallet, t, usdToSpend)
+  if ("error" in q) return { success: false, message: q.error }
 
-  if (!quote.canAfford) {
-    return { success: false, message: "Insufficient balance" }
-  }
+  if (!q.canAfford) return { success: false, message: "Insufficient balance" }
 
   const signer = createWallet(userPK)
 
-  /* 1. Fetch a fresh swap transaction from 1inch ------------------- */
+  /* 2. perform the swap using 1inch tx data ----------------------- */
+  const swapReq: ethers.TransactionRequest = {
+    from: q.tx.from, // Should be userWallet
+    to: q.tx.to, // 1inch Aggregation Router v6 address
+    data: q.tx.data,
+    value: toBigIntSafe(q.tx.value), // Amount of native BNB to send for the swap
+    gasPrice: toBigIntSafe(q.tx.gasPrice),
+    // gasLimit will be estimated dynamically below
+  }
+
   let swapTxHash = ""
-  let swapJson: any
   try {
-    const swapUrl =
-      `${ONE_INCH_BASE_URL}/swap?` +
-      `fromTokenAddress=${NATIVE_BNB_ADDRESS}` +
-      `&toTokenAddress=${t.contractAddress}` +
-      `&amount=${quote.sellAmount}` + // from saved quote
-      `&fromAddress=${userWallet}` +
-      `&destReceiver=${recipient}` +
-      `&slippage=1` +
-      `&enableEstimate=true`
-
-    const headers = { Authorization: `Bearer ${ONE_INCH_API_KEY}` }
-    swapJson = await fetchJsonSafe(swapUrl, { headers })
-
-    if (!swapJson.tx) {
-      return { success: false, message: "No valid swap transaction from 1inch." }
-    }
-
-    const swapReq: ethers.TransactionRequest = {
-      from: swapJson.tx.from,
-      to: swapJson.tx.to,
-      data: swapJson.tx.data,
-      value: BigInt(swapJson.tx.value),
-      gasPrice: BigInt(swapJson.tx.gasPrice),
-    }
-
+    // Dynamically estimate gasLimit and add a buffer
     const estimatedGas = await signer.estimateGas(swapReq)
-    swapReq.gasLimit = (estimatedGas * 120n) / 100n
+    swapReq.gasLimit = (estimatedGas * 120n) / 100n // Add 20% buffer
 
     const swapTx = await signer.sendTransaction(swapReq)
     swapTxHash = swapTx.hash
@@ -277,39 +256,61 @@ export async function executeFlashGeneration(
     return { success: false, message: error.message || "1inch swap failed." }
   }
 
-  /* 2. token fee – treasury ---------------------------------------- */
-  try {
-    const currentTokenBalance = await getTokenBalance(t.contractAddress, recipient)
-    const actualReceivedTokensWei = safeParseUnits(currentTokenBalance.toString(), t.decimals)
+  /* 3. token fee – treasury & user transfer ----------------------- */
+  // After the swap, the tokens are in the user's wallet (or the recipient's if specified in 1inch tx)
+  // We need to fetch the actual received amount and then split.
+  // NOTE: 1inch's /swap endpoint can send directly to a recipient.
+  // If the recipient is different from userWallet, the tokens are already there.
+  // If recipient is userWallet, we need to fetch the balance.
 
-    const feeTokens = (actualReceivedTokensWei * BigInt(Math.round(quote.treasuryTokenFeePercent * 1000))) / 100_000n
+  // Use the estimatedTokensReceived from the quote, as fetching actual balance immediately after swap
+  // can be unreliable due to blockchain latency.
+  const totalOut = safeParseUnits(q.estimatedTokensReceived.toString(), t.decimals)
+  // Updated calculation: Interprets q.treasuryTokenFeePercent as a direct decimal (e.g., 0.1 for 10%)
+  const feeTokens = (totalOut * BigInt(Math.round(q.treasuryTokenFeePercent * 100))) / 100n
 
-    if (feeTokens > 0n && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
-      if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
-        return { success: false, message: "Treasury wallet address suffix mismatch." }
-      }
-      await executeTokenTransfer(userPK, t.contractAddress, TREASURY_ADDRESS, safeFormatUnits(feeTokens, t.decimals))
-    }
-  } catch (error) {
-    console.error("Token fee transfer failed:", error)
-  }
-
-  /* 3. flat BNB fees ----------------------------------------------- */
-  /* 3. flat BNB fees ----------------------------------------------- */
-try {
-  if (quote.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+  // Only attempt transfer if feeTokens is greater than 0 and treasury address is valid
+  if (feeTokens > 0n && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+    // New: Verify treasury wallet address suffix
     if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
-      return { success: false, message: "Treasury wallet address suffix mismatch." }
+      return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
     }
-    await executeBNBTransfer(userPK, TREASURY_ADDRESS, (quote.treasuryFlatFeeUsd / quote.bnbPriceUsd).toString())
+    try {
+      await executeTokenTransfer(userPK, t.contractAddress, TREASURY_ADDRESS, safeFormatUnits(feeTokens, t.decimals))
+    } catch (error: any) {
+      console.error("Failed to send treasury token fee:", error)
+      // This is a post-swap operation, so the main swap is successful.
+      // Log this as a partial failure or warning.
+    }
   }
 
-  // REMOVE DEV FEE BLOCK COMPLETELY
-} catch (error) {
-  console.error("BNB fee transfers failed:", error)
-}
+  /* 4. flat BNB fees ---------------------------------------------- */
+  // Only attempt transfer if fee is greater than 0 and treasury address is valid
+  if (q.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+    // New: Verify treasury wallet address suffix
+    if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
+      return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
+    }
+    try {
+      await executeBNBTransfer(userPK, TREASURY_ADDRESS, (q.treasuryFlatFeeUsd / q.bnbPriceUsd).toString())
+    } catch (error: any) {
+      console.error("Failed to send treasury flat BNB fee:", error)
+    }
+  }
+  if (DEV_WALLET_ADDRESS && q.devFeeUsd > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
+    // New: Verify developer wallet address suffix
+    if (!verifyAddressSuffix(DEV_WALLET_ADDRESS, DEV_WALLET_LAST_DIGITS)) {
+      return { success: false, message: "Developer wallet address suffix mismatch. Transaction aborted." }
+    }
+    // q.devFeeUsd now correctly reflects DEV_AUTO_FEE_USD
+    try {
+      await executeBNBTransfer(userPK, DEV_WALLET_ADDRESS, (q.devFeeUsd / q.bnbPriceUsd).toString())
+    } catch (error: any) {
+      console.error("Failed to send dev BNB fee:", error)
+    }
+  }
 
-  /* 4. Firestore logging ------------------------------------------- */
+  /* 5. log to Firestore ------------------------------------------- */
   await addDoc(collection(db, "orders"), {
     userId,
     userEmail,
@@ -317,25 +318,25 @@ try {
     tokenId: t.contractAddress,
     tokenName: t.name,
     tokenSymbol: t.symbol,
-    usdAmountToSpend: quote.usdAmountToSpend,
-    tokenAmount: Number.parseFloat(safeFormatUnits(BigInt(swapJson.toTokenAmount || quote.buyAmount), t.decimals)),
+    usdAmountToSpend: q.usdAmountToSpend,
+    tokenAmount: q.estimatedTokensReceived, // Use estimatedTokensReceived for auto tokens
     recipientAddress: recipient,
-    bnbAmount: Number.parseFloat(safeFormatUnits(BigInt(quote.sellAmount), 18)),
-    bnbPrice: quote.bnbPriceUsd,
+    bnbAmount: Number.parseFloat(safeFormatUnits(toBigIntSafe(q.sellAmount), 18)),
+    bnbPrice: q.bnbPriceUsd,
     paymentHash: swapTxHash,
     status: "completed",
     type: "auto",
     createdAt: new Date(),
     completedAt: new Date(),
-    treasuryFlatFeeUsd: quote.treasuryFlatFeeUsd,
-    devFeeUsd: quote.devFeeUsd,
-    treasuryTokenFeePercent: quote.treasuryTokenFeePercent
+    treasuryFlatFeeUsd: q.treasuryFlatFeeUsd, // Log actual fees
+    devFeeUsd: q.devFeeUsd, // Log actual fees (DEV_AUTO_FEE_USD)
+    treasuryTokenFeePercent: q.treasuryTokenFeePercent, // Log actual fees
   })
 
   await addDoc(collection(db, "transactions"), {
     userId,
     type: "generate",
-    amount: Number.parseFloat(safeFormatUnits(BigInt(swapJson.toTokenAmount || quote.buyAmount), t.decimals)),
+    amount: q.estimatedTokensReceived, // Use estimatedTokensReceived for auto tokens
     token: t.symbol,
     hash: swapTxHash,
     status: "success",
