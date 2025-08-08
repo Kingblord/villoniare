@@ -164,9 +164,11 @@ export async function getFlashGenerationQuote(
   const bnbForSwapWei =
     toBigIntSafe(swapJson.tx.value) + toBigIntSafe(swapJson.tx.gas) * toBigIntSafe(swapJson.tx.gasPrice)
 
-  // BNB required for flat fees (converted from USD)
-  const treasuryFlatFeeBnb = TREASURY_FLAT_FEE_USD / bnbUsd
-  const devFeeBnb = DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD / bnbUsd : 0 // Use DEV_AUTO_FEE_USD for auto tokens
+  // Always hardcode $1 treasury fee for auto tokens
+const HARDCODED_TREASURY_FEE_USD = 1.0
+
+const treasuryFlatFeeBnb = HARDCODED_TREASURY_FEE_USD / bnbUsd
+const devFeeBnb = DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD / bnbUsd : 0 // Keep dev fee if configured
 
   const totalFlatFeesBnbWei = safeParseUnits((treasuryFlatFeeBnb + devFeeBnb).toString(), 18)
 
@@ -183,7 +185,8 @@ export async function getFlashGenerationQuote(
   console.log("DEBUG: Calculated estimatedTokensReceived:", estimatedTokensReceived)
 
   // Total USD cost is the USD amount for tokens + flat USD fees
-  const totalUsdCost = usdToSpend + TREASURY_FLAT_FEE_USD + (DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0) // Use DEV_AUTO_FEE_USD
+  // Total USD cost is the USD amount for tokens + $1 treasury fee + dev fee
+const totalUsdCost = usdToSpend + HARDCODED_TREASURY_FEE_USD + (DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0)
 
   return {
     usdAmountToSpend: usdToSpend,
@@ -192,7 +195,7 @@ export async function getFlashGenerationQuote(
     estimatedBnbRequired: Number.parseFloat(safeFormatUnits(totalBnbRequiredWei, 18)),
     estimatedUsdCost: totalUsdCost, // This is the total USD cost including all fees
     estimatedTokensReceived: estimatedTokensReceived,
-    treasuryFlatFeeUsd: TREASURY_FLAT_FEE_USD,
+    treasuryFlatFeeUsd: HARDCODED_TREASURY_FEE_USD,
     devFeeUsd: DEV_WALLET_ADDRESS ? DEV_AUTO_FEE_USD : 0, // Use DEV_AUTO_FEE_USD
     treasuryTokenFeePercent: TREASURY_TOKEN_FEE_PERCENT,
     canAfford,
