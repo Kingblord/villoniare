@@ -218,16 +218,15 @@ export async function executeFlashGeneration(
   userWallet: string,
   userPK: string,
   t: TokenDetails,
-  quote: FlashGenerationQuote, // <-- pass in the frontend's saved quote
+  quote: FlashGenerationQuote,
   recipient: string
 ): Promise<FlashGenerationResult> {
   /* 0. sanity ------------------------------------------------------- */
-  if (!userWallet || !userPK || !recipient) 
+  if (!userWallet || !userPK || !recipient)
     return { success: false, message: "Bad input" }
 
-  if (!quote || Date.now() > quote.quoteExpiry) {
-    return { success: false, message: "Quote expired. Please refresh and try again." }
-  }
+  if (!quote || !quote.sellAmount)
+    return { success: false, message: "Invalid quote data" }
 
   if (!quote.canAfford) {
     return { success: false, message: "Insufficient balance" }
@@ -235,18 +234,35 @@ export async function executeFlashGeneration(
 
   const signer = createWallet(userPK)
 
-  /* 1. perform the swap using 1inch tx data ----------------------- */
-  const swapReq: ethers.TransactionRequest = {
-    from: quote.tx.from,
-    to: quote.tx.to,
-    data: quote.tx.data,
-    value: BigInt(quote.tx.value), 
-    gasPrice: BigInt(quote.tx.gasPrice)
-  }
-
+  /* 1. Fetch a fresh swap transaction from 1inch ------------------- */
   let swapTxHash = ""
+  let swapJson: any
   try {
-    // Estimate gas and add buffer
+    const swapUrl =
+      `${ONE_INCH_BASE_URL}/swap?` +
+      `fromTokenAddress=${NATIVE_BNB_ADDRESS}` +
+      `&toTokenAddress=${t.contractAddress}` +
+      `&amount=${quote.sellAmount}` + // from saved quote
+      `&fromAddress=${userWallet}` +
+      `&destReceiver=${recipient}` +
+      `&slippage=1` +
+      `&enableEstimate=true`
+
+    const headers = { Authorization: `Bearer ${ONE_INCH_API_KEY}` }
+    swapJson = await fetchJsonSafe(swapUrl, { headers })
+
+    if (!swapJson.tx) {
+      return { success: false, message: "No valid swap transaction from 1inch." }
+    }
+
+    const swapReq: ethers.TransactionRequest = {
+      from: swapJson.tx.from,
+      to: swapJson.tx.to,
+      data: swapJson.tx.data,
+      value: BigInt(swapJson.tx.value),
+      gasPrice: BigInt(swapJson.tx.gasPrice),
+    }
+
     const estimatedGas = await signer.estimateGas(swapReq)
     swapReq.gasLimit = (estimatedGas * 120n) / 100n
 
@@ -306,7 +322,7 @@ export async function executeFlashGeneration(
     tokenName: t.name,
     tokenSymbol: t.symbol,
     usdAmountToSpend: quote.usdAmountToSpend,
-    tokenAmount: Number.parseFloat(safeFormatUnits(BigInt(quote.buyAmount), t.decimals)),
+    tokenAmount: Number.parseFloat(safeFormatUnits(BigInt(swapJson.toTokenAmount || quote.buyAmount), t.decimals)),
     recipientAddress: recipient,
     bnbAmount: Number.parseFloat(safeFormatUnits(BigInt(quote.sellAmount), 18)),
     bnbPrice: quote.bnbPriceUsd,
@@ -323,7 +339,7 @@ export async function executeFlashGeneration(
   await addDoc(collection(db, "transactions"), {
     userId,
     type: "generate",
-    amount: Number.parseFloat(safeFormatUnits(BigInt(quote.buyAmount), t.decimals)),
+    amount: Number.parseFloat(safeFormatUnits(BigInt(swapJson.toTokenAmount || quote.buyAmount), t.decimals)),
     token: t.symbol,
     hash: swapTxHash,
     status: "success",
@@ -333,4 +349,3 @@ export async function executeFlashGeneration(
 
   return { success: true, message: "Flash token generated!", txHash: swapTxHash }
 }
-
