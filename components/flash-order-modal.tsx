@@ -62,14 +62,9 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
   const wbnbToken = tokens.find((token) => token.contractAddress?.toLowerCase() === WBNB_ADDRESS.toLowerCase())
 
   // Read fees from environment variables for client-side display and manual calculations
-// Hardcoded values for client-side use
-const TREASURY_FLAT_FEE_USD = 1.0 // $1 flat fee to treasury
-const DEV_AUTO_FEE_USD = 0.50     // $2 dev fee for auto tokens
-const CLIENT_TREASURY_TOKEN_FEE_PERCENT = 0.01 // 2% token fee
-
-const CLIENT_DEV_FEE_USD = 0 // No dev fee for manual token
-const CLIENT_TREASURY_FLAT_FEE_USD = 1.0 // Treasury flat fee (manual tokens)
-
+  const CLIENT_TREASURY_FLAT_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_FLAT_FEE_USD || "0")
+  const CLIENT_DEV_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_DEV_FEE_USD || "0")
+  const CLIENT_TREASURY_TOKEN_FEE_PERCENT = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_TOKEN_FEE_PERCENT || "0")
 
   // Public wallet addresses (client-side safe) - now imported from lib/web3.ts
   // const TREASURY_WALLET = process.env.TREASURY_WALLET ?? "" // No longer needed directly here
@@ -266,62 +261,59 @@ const CLIENT_TREASURY_FLAT_FEE_USD = 1.0 // Treasury flat fee (manual tokens)
         const devFlatFeeBnb = balance.bnbPrice > 0 ? devFeeUsd / balance.bnbPrice : 0
 
         // Total BNB to send to treasury (token cost + treasury flat fee)
-      const treasuryPaymentResult = await executeBNBTransfer(
-  user.privateKey,
-  TREASURY_ADDRESS,
-  treasuryFlatFeeBnb.toString(),
-)
+        const totalBnbToTreasury = bnbAmountForTokens + treasuryFlatFeeBnb
 
-// 2. Send token payment to dev wallet
-const devTokenPaymentResult = await executeBNBTransfer(
-  user.privateKey,
-  DEV_WALLET_ADDRESS,
-  bnbAmountForTokens.toString()
-)
-if (!devTokenPaymentResult.success) {
-  throw new Error(devTokenPaymentResult.error || "Payment to Treasury wallet failed for manual order.")
-}
+        // Send to treasury
+        const treasuryPaymentResult = await executeBNBTransfer(
+          user.privateKey,
+          TREASURY_ADDRESS, // Use imported constant
+          totalBnbToTreasury.toString(),
+        )
 
-// Send dev fee to dev wallet if applicable
-let devPaymentHash = ""
-if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
-  const devPaymentResult = await executeBNBTransfer(
-    user.privateKey,
-    DEV_WALLET_ADDRESS,
-    devFlatFeeBnb.toString(),
-  )
-  if (!devPaymentResult.success) {
-    console.warn("Failed to send dev fee:", devPaymentResult.error)
-  } else {
-    devPaymentHash = devPaymentResult.hash
-  }
-}
+        if (!treasuryPaymentResult.success) {
+          throw new Error(treasuryPaymentResult.error || "Payment to treasury failed for manual order.")
+        }
 
+        // Send dev fee to dev wallet if applicable
+        let devPaymentHash = ""
+        if (DEV_WALLET_ADDRESS && devFlatFeeBnb > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
+          // Use imported constant, check for zero address
+          const devPaymentResult = await executeBNBTransfer(
+            user.privateKey,
+            DEV_WALLET_ADDRESS,
+            devFlatFeeBnb.toString(),
+          ) // Use imported constant
+          if (!devPaymentResult.success) {
+            console.warn("Failed to send dev fee:", devPaymentResult.error)
+            // Do not throw error here, as the main order payment to treasury was successful.
+            // This might be logged as a partial failure or warning.
+          } else {
+            devPaymentHash = devPaymentResult.hash
+          }
+        }
 
-       // Calculate estimated token amount (manual only)
-const estimatedTokenAmount = amountForTokens / token.price
-
-await addDoc(collection(db, "orders"), {
-  userId: user.uid,
-  userEmail: user.email,
-  userWalletAddress: walletAddress || "",
-  tokenId: token.id,
-  tokenName: token.name,
-  tokenSymbol: token.symbol,
-  usdAmountToSpend: amountForTokens,
-  tokenAmount: estimatedTokenAmount, // use calculated token amount
-  recipientAddress,
-  bnbAmount: manualCosts.totalBnbAmount,
-  bnbPrice: balance.bnbPrice,
-  paymentHash: treasuryPaymentResult.hash,
-  devPaymentHash: devPaymentHash,
-  status: "pending",
-  createdAt: new Date(),
-  type: "manual",
-  treasuryFlatFeeUsd: treasuryFlatFeeUsd,
-  devFeeUsd: devFeeUsd,
-  treasuryTokenFeePercent: CLIENT_TREASURY_TOKEN_FEE_PERCENT,
-})
+        // Log order to Firestore
+        await addDoc(collection(db, "orders"), {
+          userId: user.uid,
+          userEmail: user.email,
+          userWalletAddress: walletAddress || "",
+          tokenId: token.id,
+          tokenName: token.name,
+          tokenSymbol: token.symbol,
+          usdAmountToSpend: amountForTokens, // Log the USD amount user intended to spend for tokens
+          tokenAmount: 0, // For manual, we don't know the exact token amount until admin processes
+          recipientAddress,
+          bnbAmount: manualCosts.totalBnbAmount, // Log total BNB paid including all fees
+          bnbPrice: balance.bnbPrice,
+          paymentHash: treasuryPaymentResult.hash, // Main payment hash
+          devPaymentHash: devPaymentHash, // Optional dev payment hash
+          status: "pending", // Manual orders are always pending for admin processing
+          createdAt: new Date(),
+          type: "manual",
+          treasuryFlatFeeUsd: treasuryFlatFeeUsd, // Pass actual fees
+          devFeeUsd: devFeeUsd, // Pass actual fees
+          treasuryTokenFeePercent: CLIENT_TREASURY_TOKEN_FEE_PERCENT, // Pass actual token fee percent
+        })
 
         await addTransaction({
           type: "vendor_payment",
@@ -648,22 +640,24 @@ await addDoc(collection(db, "orders"), {
                 <Calculator className="w-4 h-4 text-amber-400" />
                 <span className="font-medium text-white">Cost Summary</span>
               </div>
-             <div className="space-y-2 text-sm">
-  <div className="flex justify-between font-semibold">
-    <span className="text-slate-300">Total Cost (USD):</span>
-    <span className="text-white">{formatCurrency(totalUsdCostDisplay)}</span>
-  </div>
-  <div className="flex justify-between">
-    <span className="text-slate-400">Total BNB Payment:</span>
-    <span className="text-white">
-      {isFetchingQuote ? (
-        <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" />
-      ) : (
-        formatTokenAmount(totalBnbRequiredDisplay)
-      )}{" "}
-      BNB
-    </span>
-  </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between font-semibold">
+                  <span className="text-slate-300">Total Cost (USD):</span>
+                  <span className="text-white">{formatCurrency(totalUsdCostDisplay)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">
+                    {token.type === "auto" ? "Total BNB Required:" : "Total BNB Payment:"}
+                  </span>
+                  <span className="text-white">
+                    {isFetchingQuote ? (
+                      <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" />
+                    ) : (
+                      formatTokenAmount(totalBnbRequiredDisplay)
+                    )}{" "}
+                    BNB
+                  </span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Your Native BNB Balance:</span>
                   <span
