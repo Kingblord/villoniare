@@ -49,8 +49,7 @@ const ONE_INCH_BASE_URL = "https://api.1inch.dev/swap/v6.0/56" // Base URL for 1
 const NATIVE_BNB_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" // Special address for native BNB
 
 /* ---- ENV (These are now read from process.env directly for server-side, but the addresses are from lib/web3.ts) */
-const TREASURY_FLAT_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_FLAT_FEE_USD || "0")
-const DEV_AUTO_FEE_USD = Number.parseFloat(process.env.NEXT_PUBLIC_DEV_AUTO_FEE_USD || "0") // Use for auto tokens
+
 const TREASURY_TOKEN_FEE_PERCENT = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_TOKEN_FEE_PERCENT || "0")
 
 /* ------------------------------------------------------------------
