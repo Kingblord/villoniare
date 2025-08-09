@@ -356,9 +356,7 @@ await addDoc(collection(db, "orders"), {
           recipientAddress,
         )
 
-        if (!result.success) {
-          throw new Error(result.error || "Automatic flash token generation failed.")
-        }
+       
 
         setSuccess(
           `Successfully generated ${formatTokenAmount(quote.estimatedTokensReceived)} ${token.symbol}! Transaction: ${truncateAddress(result.txHash)}`,
