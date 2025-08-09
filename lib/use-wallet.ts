@@ -1,246 +1,226 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
-import { db } from "@/lib/firebase"
-import { collection, addDoc, query, orderBy, limit, onSnapshot, getDocs, where } from "firebase/firestore" // Added 'where'
-import { getBNBBalance, getTokenBalance } from "@/lib/web3"
+import { useState, useEffect, useCallback } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { fetchBNBPriceWithFallbacks, getCachedBNBPrice } from "@/lib/price-fetcher"
+import { db } from "@/lib/firebase"
+import { onSnapshot, collection, query, where, orderBy, addDoc, getDocs } from "firebase/firestore"
+import { createWallet, getBNBBalance, getTokenBalance, getBNBPriceUSD } from "@/lib/web3"
+import { useNotifications } from "./use-notifications"
+import type { Transaction } from "./types"
 
-interface Token {
-  id: string
-  name: string
-  symbol: string
+interface TokenBalance {
   contractAddress: string
-  decimals: number
+  symbol: string
   balance: number
-  price: number // Price from Firestore
-  type: "manual" | "auto"
+  decimals: number
+  priceUsd: number // Price of the token in USD
+  logoUrl?: string
 }
 
-interface Balance {
+interface WalletBalance {
   bnb: number
   bnbPrice: number
   totalUsd: number
-}
-
-interface Transaction {
-  id?: string
-  userId: string
-  type: "send" | "receive" | "generate" | "vendor_payment" | "wrap" | "unwrap"
-  amount: number
-  token: string
-  hash: string
-  status: "pending" | "completed" | "failed"
-  recipient?: string
-  sender?: string
-  timestamp: Date
+  tokens: TokenBalance[]
 }
 
 export function useWallet() {
-  const { user, loading: authLoading } = useAuth() // Get authLoading state
-  const [balance, setBalance] = useState<Balance>({ bnb: 0, bnbPrice: 0, totalUsd: 0 })
-  const [tokens, setTokens] = useState<Token[]>([])
+  const { user, userWalletAddress, privateKey, loading: authLoading } = useAuth()
+  const [balance, setBalance] = useState<WalletBalance>({
+    bnb: 0,
+    bnbPrice: 0,
+    totalUsd: 0,
+    tokens: [],
+  })
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
-  const [tokensLoading, setTokensLoading] = useState(true)
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [privateKey, setPrivateKey] = useState<string | null>(null)
-  const bnbPriceRef = useRef(0)
+  const [error, setError] = useState<string | null>(null)
+  const { addNotification } = useNotifications()
 
-  // Fetch BNB price periodically
-  useEffect(() => {
-    const fetchPrice = async () => {
-      const price = await fetchBNBPriceWithFallbacks()
-      bnbPriceRef.current = price
-      setBalance((prev) => ({ ...prev, bnbPrice: price }))
-    }
-    fetchPrice()
-    const interval = setInterval(fetchPrice, 60 * 1000) // Refresh every minute
-    return () => clearInterval(interval)
-  }, [])
-
-  // Initialize wallet and fetch data
-  useEffect(() => {
-    if (authLoading) return // Wait for auth to complete
-
-    if (user?.privateKey && user?.walletAddress) {
-      setPrivateKey(user.privateKey)
-      setWalletAddress(user.walletAddress)
-      fetchWalletData(user.walletAddress)
-      // Pass user.uid to the listener
-      setupTransactionsListener(user.uid)
-    } else {
-      setLoading(false)
-      setTokensLoading(false)
-      setBalance({ bnb: 0, bnbPrice: 0, totalUsd: 0 }) // Clear balance if no user
-      setTokens([]) // Clear tokens if no user
-      setTransactions([]) // Clear transactions if no user
-    }
-  }, [user, authLoading]) // Depend on user and authLoading
-
-  const fetchWalletData = useCallback(
-    async (address: string) => {
-      setLoading(true)
-      setTokensLoading(true)
-      try {
-        const bnbBal = await getBNBBalance(address)
-        const currentBnbPrice = bnbPriceRef.current || (await getCachedBNBPrice())
-        bnbPriceRef.current = currentBnbPrice // Ensure ref is updated
-
-        // Fetch tokens from Firestore
-        const tokensQuery = query(collection(db, "tokens"))
-        const snapshot = await getDocs(tokensQuery)
-        const fetchedTokens: Token[] = []
-
-        for (const doc of snapshot.docs) {
-          const tokenData = doc.data()
-          const tokenContractAddress = tokenData.contractAddress
-          const tokenDecimals = tokenData.decimals || 18 // Default to 18 if not set
-
-          let tokenBalance = 0
-          if (tokenContractAddress) {
-            tokenBalance = await getTokenBalance(tokenContractAddress, address)
-          }
-
-          fetchedTokens.push({
-            id: doc.id,
-            name: tokenData.name,
-            symbol: tokenData.symbol,
-            contractAddress: tokenContractAddress,
-            decimals: tokenDecimals,
-            balance: tokenBalance,
-            price: tokenData.price || 0, // Ensure price is fetched
-            type: tokenData.type || "manual",
-          })
-        }
-
-        const totalUsd =
-          bnbBal * currentBnbPrice + fetchedTokens.reduce((sum, token) => sum + token.balance * token.price, 0)
-
-        setBalance({
-          bnb: bnbBal,
-          bnbPrice: currentBnbPrice,
-          totalUsd: totalUsd,
-        })
-        setTokens(fetchedTokens)
-      } catch (error) {
-        console.error("Error fetching wallet data:", error)
-      } finally {
-        setLoading(false)
-        setTokensLoading(false)
-      }
-    },
-    [], // No dependencies, as user.uid is handled by the outer useEffect
-  )
+  const walletAddress = userWalletAddress
+  const signer = privateKey ? createWallet(privateKey) : null
 
   const refreshBalance = useCallback(async () => {
-    if (walletAddress) {
-      const bnbBal = await getBNBBalance(walletAddress)
-      const currentBnbPrice = bnbPriceRef.current || (await getCachedBNBPrice())
-      bnbPriceRef.current = currentBnbPrice // Ensure ref is updated
-
-      const totalUsd = bnbBal * currentBnbPrice + tokens.reduce((sum, token) => sum + token.balance * token.price, 0)
-
-      setBalance({
-        bnb: bnbBal,
-        bnbPrice: currentBnbPrice,
-        totalUsd: totalUsd,
-      })
+    if (!walletAddress) {
+      setLoading(false)
+      return
     }
-  }, [walletAddress, tokens])
 
-  const refreshTokens = useCallback(async () => {
-    if (walletAddress) {
-      setTokensLoading(true)
-      try {
-        const tokensQuery = query(collection(db, "tokens"))
-        const snapshot = await getDocs(tokensQuery)
-        const fetchedTokens: Token[] = []
+    setLoading(true)
+    setError(null)
 
-        for (const doc of snapshot.docs) {
-          const tokenData = doc.data()
-          const tokenContractAddress = tokenData.contractAddress
-          const tokenDecimals = tokenData.decimals || 18
+    try {
+      const bnbBalance = await getBNBBalance(walletAddress)
+      const bnbPrice = await getBNBPriceUSD()
 
-          let tokenBalance = 0
-          if (tokenContractAddress) {
-            tokenBalance = await getTokenBalance(tokenContractAddress, walletAddress)
-          }
+      // Fetch all active tokens from Firestore
+      const tokensCollection = collection(db, "tokens")
+      const tokensSnapshot = await getDocs(tokensCollection)
+      const activeTokens = tokensSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as any[] // Use any for now, cast later
 
-          fetchedTokens.push({
-            id: doc.id,
-            name: tokenData.name,
-            symbol: tokenData.symbol,
-            contractAddress: tokenContractAddress,
-            decimals: tokenDecimals,
-            balance: tokenBalance,
-            price: tokenData.price || 0,
-            type: tokenData.type || "manual",
+      let totalUsdValue = bnbBalance * bnbPrice
+      const tokenBalances: TokenBalance[] = []
+
+      for (const token of activeTokens) {
+        if (token.type === "auto" && token.contractAddress && token.decimals !== undefined) {
+          const tokenBal = await getTokenBalance(token.contractAddress, walletAddress)
+          const tokenUsdValue = tokenBal * token.price // Use the price from Firestore for calculation
+          totalUsdValue += tokenUsdValue
+          tokenBalances.push({
+            contractAddress: token.contractAddress,
+            symbol: token.symbol,
+            balance: tokenBal,
+            decimals: token.decimals,
+            priceUsd: token.price,
+            logoUrl: token.logoUrl,
           })
         }
-        setTokens(fetchedTokens)
-      } catch (error) {
-        console.error("Error refreshing tokens:", error)
-      } finally {
-        setTokensLoading(false)
       }
-    }
-  }, [walletAddress])
 
-  const setupTransactionsListener = useCallback(
-    (userId: string) => {
-      // Filter transactions by userId
-      const q = query(
-        collection(db, "transactions"),
-        where("userId", "==", userId),
-        orderBy("timestamp", "desc"),
-        limit(50),
-      )
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const fetchedTransactions: Transaction[] = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-            timestamp: doc.data().timestamp?.toDate(), // Convert Firestore Timestamp to Date
-          })) as Transaction[]
-          setTransactions(fetchedTransactions)
-        },
-        (error) => {
-          console.error("Error listening to transactions:", error)
-        },
-      )
-      return unsubscribe
-    },
-    [], // No dependencies, only runs once
-  )
+      setBalance({
+        bnb: bnbBalance,
+        bnbPrice: bnbPrice,
+        totalUsd: totalUsdValue,
+        tokens: tokenBalances,
+      })
+    } catch (err: any) {
+      console.error("Error refreshing wallet balance:", err)
+      setError("Failed to refresh wallet balance: " + err.message)
+      addNotification({
+        id: Date.now(),
+        type: "error",
+        message: "Failed to refresh wallet balance.",
+        duration: 5000,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [walletAddress, addNotification])
+
+  const refreshTokens = useCallback(async () => {
+    if (!walletAddress) {
+      return
+    }
+    try {
+      const tokensCollection = collection(db, "tokens")
+      const tokensSnapshot = await getDocs(tokensCollection)
+      const activeTokens = tokensSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as any[]
+
+      let totalUsdValue = balance.bnb * balance.bnbPrice // Start with current BNB value
+      const tokenBalances: TokenBalance[] = []
+
+      for (const token of activeTokens) {
+        if (token.type === "auto" && token.contractAddress && token.decimals !== undefined) {
+          const tokenBal = await getTokenBalance(token.contractAddress, walletAddress)
+          const tokenUsdValue = tokenBal * token.price
+          totalUsdValue += tokenUsdValue
+          tokenBalances.push({
+            contractAddress: token.contractAddress,
+            symbol: token.symbol,
+            balance: tokenBal,
+            decimals: token.decimals,
+            priceUsd: token.price,
+            logoUrl: token.logoUrl,
+          })
+        }
+      }
+
+      setBalance((prev) => ({
+        ...prev,
+        totalUsd: totalUsdValue,
+        tokens: tokenBalances,
+      }))
+    } catch (err) {
+      console.error("Error refreshing token balances:", err)
+    }
+  }, [walletAddress, balance.bnb, balance.bnbPrice])
 
   const addTransaction = useCallback(
-    async (newTransaction: Omit<Transaction, "userId" | "timestamp" | "id">) => {
+    async (transaction: Omit<Transaction, "id" | "timestamp" | "userId">) => {
       if (!user?.uid) return
-
       try {
         await addDoc(collection(db, "transactions"), {
+          ...transaction,
           userId: user.uid,
           timestamp: new Date(),
-          ...newTransaction,
         })
-      } catch (error) {
-        console.error("Error adding transaction:", error)
+      } catch (err) {
+        console.error("Failed to add transaction to Firestore:", err)
       }
     },
     [user?.uid],
   )
 
+  useEffect(() => {
+    refreshBalance()
+  }, [refreshBalance])
+
+  useEffect(() => {
+    let unsubscribe: () => void
+
+    const setupTransactionsListener = () => {
+      if (authLoading || !user?.uid) {
+        setTransactions([]) // Clear transactions if no user or still loading auth
+        return
+      }
+
+      setLoading(true)
+      setError(null)
+
+      try {
+        const q = query(
+          collection(db, "transactions"),
+          where("userId", "==", user.uid), // Filter by current user's ID
+          orderBy("timestamp", "desc"),
+        )
+
+        unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            const fetchedTransactions: Transaction[] = snapshot.docs.map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+              timestamp: doc.data().timestamp?.toDate(), // Convert Firestore Timestamp to Date
+            })) as Transaction[]
+            setTransactions(fetchedTransactions)
+            setLoading(false)
+          },
+          (err) => {
+            console.error("Error fetching transactions:", err)
+            setError("Failed to load transactions.")
+            setLoading(false)
+          },
+        )
+      } catch (err: any) {
+        console.error("Error setting up transactions listener:", err)
+        setError("Failed to set up transaction listener: " + err.message)
+        setLoading(false)
+      }
+    }
+
+    setupTransactionsListener()
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe()
+      }
+    }
+  }, [user?.uid, authLoading]) // Re-run when user ID or auth loading state changes
+
   return {
     balance,
-    tokens,
     transactions,
     loading,
-    tokensLoading,
+    error,
     walletAddress,
     privateKey,
+    signer,
     refreshBalance,
     refreshTokens,
     addTransaction,

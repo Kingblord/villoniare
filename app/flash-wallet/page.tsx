@@ -25,6 +25,7 @@ import { useWallet } from "@/lib/use-wallet"
 import { formatCurrency, formatTokenAmount, truncateAddress } from "@/lib/utils"
 import Link from "next/link"
 import { ImportTokenModal } from "@/components/import-token-modal"
+import { WBNB_ADDRESS } from "@/lib/web3"
 import { useAuth } from "@/lib/auth-context"
 
 // Local helper ─ determines the text color for a transaction amount
@@ -55,7 +56,8 @@ export default function FlashWalletPage() {
   const { balance, tokens, transactions, walletAddress, privateKey, loading, refreshBalance, refreshTokens } =
     useWallet()
   const [showImportTokenModal, setShowImportTokenModal] = useState(false)
-  const hasNativeBNB = balance.bnb > 0.001
+ 
+
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
@@ -118,10 +120,7 @@ export default function FlashWalletPage() {
     )
   }
 
- const tokensToDisplay = tokens.filter(
-  (token) => token.balance > 0 || token.isImported || token.type === "manual"
-)
-
+ 
   return (
     <AuthGuard requirePin={true}>
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white pb-20">
@@ -173,13 +172,6 @@ export default function FlashWalletPage() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-white mb-2">{formatCurrency(balance.totalUsd)}</div>
-              <div className="text-slate-300 space-y-1">
-               {hasNativeBNB ? (
-  <div>{formatTokenAmount(balance.bnb)} BNB</div>
-) : (
-  <div>0 BNB</div>
-)}
-              </div>
               {balance.bnbPrice > 0 && (
                 <div className="text-sm text-slate-400">BNB Price: {formatCurrency(balance.bnbPrice)}</div>
               )}
