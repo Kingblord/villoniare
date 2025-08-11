@@ -29,9 +29,9 @@ interface Order {
   tokenId: string
   tokenName: string
   tokenSymbol: string
-  tokenAmount: number // For auto, this is the estimated tokens received. For manual, it's 0.
+  tokenAmount: number
   recipientAddress: string
-  usdAmountToSpend: number // Renamed from usdAmount for clarity
+  usdAmount: number
   bnbAmount: number
   bnbPrice: number
   paymentHash: string
@@ -39,9 +39,6 @@ interface Order {
   createdAt: Date
   completedAt?: Date
   type: "manual" | "auto" // New field
-  totalUsdAmount?: number // Added for manual orders to log total USD paid
-  tokenCostUsd?: number // Added for manual orders to log token cost
-  networkFeeUsd?: number // Added for manual orders to log network fee
 }
 
 // Remove contract-related functions and simplify token management

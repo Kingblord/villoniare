@@ -313,9 +313,6 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
           treasuryFlatFeeUsd: treasuryFlatFeeUsd, // Pass actual fees
           devFeeUsd: devFeeUsd, // Pass actual fees
           treasuryTokenFeePercent: CLIENT_TREASURY_TOKEN_FEE_PERCENT, // Pass actual token fee percent
-          totalUsdAmount: manualCosts.totalUsdAmount, // Log total USD paid
-          tokenCostUsd: manualCosts.tokenCostUsd, // Log token cost USD
-          networkFeeUsd: CLIENT_TREASURY_FLAT_FEE_USD, // Assuming network fee is part of treasury flat fee
         })
 
         await addTransaction({

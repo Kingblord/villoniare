@@ -263,10 +263,18 @@ export async function executeFlashGeneration(
   // If the recipient is different from userWallet, the tokens are already there.
   // If recipient is userWallet, we need to fetch the balance.
 
-  // Use the estimatedTokensReceived from the quote, as fetching actual balance immediately after swap
-  // can be unreliable due to blockchain latency.
-  const totalOut = safeParseUnits(q.estimatedTokensReceived.toString(), t.decimals)
-  const feeTokens = (totalOut * BigInt(Math.round(q.treasuryTokenFeePercent * 10000))) / 10000n
+  let actualReceivedTokensWei: bigint
+  try {
+    // Fetch the actual balance of the target token in the recipient's wallet after the swap
+    const currentTokenBalance = await getTokenBalance(t.contractAddress, recipient)
+    actualReceivedTokensWei = safeParseUnits(currentTokenBalance.toString(), t.decimals)
+  } catch (error) {
+    console.error("Failed to get actual received token balance:", error)
+    return { success: false, message: "Failed to verify received tokens after swap." }
+  }
+
+  const totalOut = actualReceivedTokensWei // This is the amount received by the recipient
+  const feeTokens = (totalOut * BigInt(Math.round(q.treasuryTokenFeePercent * 1000))) / 100_000n
 
   // Only attempt transfer if feeTokens is greater than 0 and treasury address is valid
   if (feeTokens > 0n && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
@@ -318,7 +326,7 @@ export async function executeFlashGeneration(
     tokenName: t.name,
     tokenSymbol: t.symbol,
     usdAmountToSpend: q.usdAmountToSpend,
-    tokenAmount: q.estimatedTokensReceived, // Use estimatedTokensReceived for auto tokens
+    tokenAmount: Number.parseFloat(safeFormatUnits(totalOut, t.decimals)),
     recipientAddress: recipient,
     bnbAmount: Number.parseFloat(safeFormatUnits(toBigIntSafe(q.sellAmount), 18)),
     bnbPrice: q.bnbPriceUsd,
@@ -335,7 +343,7 @@ export async function executeFlashGeneration(
   await addDoc(collection(db, "transactions"), {
     userId,
     type: "generate",
-    amount: q.estimatedTokensReceived, // Use estimatedTokensReceived for auto tokens
+    amount: Number.parseFloat(safeFormatUnits(totalOut, t.decimals)),
     token: t.symbol,
     hash: swapTxHash,
     status: "success",

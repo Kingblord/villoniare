@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Edit, Trash2, Package, ShoppingCart, Check, LogOut, Shield, Copy, Loader2, Eraser } from "lucide-react"
+import { Plus, Edit, Trash2, Package, ShoppingCart, Check, LogOut, Shield, Copy, Loader2, Eraser } from "lucide-react" // Added Eraser icon
 import { AdminGuard } from "@/components/admin-guard"
 import { useAdmin } from "@/lib/use-admin"
 import { useAuth } from "@/lib/auth-context"
@@ -606,10 +606,7 @@ export default function AdminPage() {
                             <div className="text-sm text-slate-400 space-y-1">
                               <p>User: {order.userEmail}</p>
                               <p>
-                                Amount:{" "}
-                                {order.type === "manual"
-                                  ? `${formatCurrency(order.usdAmountToSpend)} for ${order.tokenName}`
-                                  : `${formatTokenAmount(order.tokenAmount)} ${order.tokenSymbol}`}
+                                Amount: {formatTokenAmount(order.tokenAmount)} {order.tokenSymbol}
                               </p>
                               <p>Recipient: {truncateAddress(order.recipientAddress)}</p>
                               <p>
@@ -648,11 +645,6 @@ export default function AdminPage() {
                   ))
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-4">
-                Note: For manual orders, the "Amount" displays the USD value the user intended to spend, as the exact
-                token quantity is determined during manual processing. For automatic orders, it displays the estimated
-                tokens received.
-              </p>
             </TabsContent>
           </Tabs>
         </div>
