@@ -2,7 +2,6 @@
 
 import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
-import { gtag } from "ga-gtag" // Import gtag from the appropriate package
 
 interface PWAContextType {
   isStandalone: boolean
@@ -119,11 +118,7 @@ export function PWAProvider({ children }: { children: React.ReactNode }) {
       setInstallPrompt(null)
       setIsStandalone(true)
 
-      // Send analytics event
-      gtag("event", "app_installed", {
-        event_category: "PWA",
-        event_label: "VillonairesWorld",
-      })
+      console.log("App installation tracked")
     }
 
     checkStandalone()

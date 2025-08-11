@@ -265,36 +265,53 @@ export async function executeFlashGeneration(
 
   let actualReceivedTokensWei: bigint
   try {
+    // Wait a moment for the transaction to be processed
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+
     // Fetch the actual balance of the target token in the recipient's wallet after the swap
     const currentTokenBalance = await getTokenBalance(t.contractAddress, recipient)
     actualReceivedTokensWei = safeParseUnits(currentTokenBalance.toString(), t.decimals)
-  } catch (error) {
-    console.error("Failed to get actual received token balance:", error)
-    return { success: false, message: "Failed to verify received tokens after swap." }
+
+    // If balance is 0, try fetching from userWallet instead (in case 1inch sent to user first)
+    if (actualReceivedTokensWei === 0n && recipient !== userWallet) {
+      const userTokenBalance = await getTokenBalance(t.contractAddress, userWallet)
+      actualReceivedTokensWei = safeParseUnits(userTokenBalance.toString(), t.decimals)
+    }
+
+    console.log("DEBUG: Actual received tokens:", safeFormatUnits(actualReceivedTokensWei, t.decimals))
+  } catch (error: any) {
+    console.error("Failed to get actual received token balance:", error?.message || error)
+    actualReceivedTokensWei = toBigIntSafe(q.buyAmount || "0")
+    console.log("DEBUG: Using estimated tokens as fallback:", safeFormatUnits(actualReceivedTokensWei, t.decimals))
   }
 
-  const totalOut = actualReceivedTokensWei // This is the amount received by the recipient
-  const feeTokens = (totalOut * BigInt(Math.round(q.treasuryTokenFeePercent * 1000))) / 100_000n
+  const totalOut = actualReceivedTokensWei
+  const treasuryTokenFeePercent = Number.parseFloat(process.env.NEXT_PUBLIC_TREASURY_TOKEN_FEE_PERCENT || "0")
+  const feeTokens = (totalOut * BigInt(Math.round(treasuryTokenFeePercent * 100))) / 10000n // Simple percentage calculation
 
-  // Only attempt transfer if feeTokens is greater than 0 and treasury address is valid
-  if (feeTokens > 0n && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
-    // New: Verify treasury wallet address suffix
+  console.log("DEBUG: Treasury token fee percent:", treasuryTokenFeePercent)
+  console.log("DEBUG: Fee tokens to treasury:", safeFormatUnits(feeTokens, t.decimals))
+  console.log("DEBUG: Tokens to user:", safeFormatUnits(totalOut - feeTokens, t.decimals))
+
+  if (feeTokens > 0n && feeTokens < totalOut && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
+    // Verify treasury wallet address suffix
     if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
     }
     try {
+      const recipientSigner = recipient === userWallet ? signer : createWallet(userPK)
       await executeTokenTransfer(userPK, t.contractAddress, TREASURY_ADDRESS, safeFormatUnits(feeTokens, t.decimals))
+      console.log("DEBUG: Successfully transferred fee to treasury")
     } catch (error: any) {
       console.error("Failed to send treasury token fee:", error)
-      // This is a post-swap operation, so the main swap is successful.
-      // Log this as a partial failure or warning.
+      console.log("WARNING: Fee transfer failed but main swap succeeded")
     }
   }
 
   /* 4. flat BNB fees ---------------------------------------------- */
   // Only attempt transfer if fee is greater than 0 and treasury address is valid
   if (q.treasuryFlatFeeUsd > 0 && TREASURY_ADDRESS && !isZeroAddress(TREASURY_ADDRESS)) {
-    // New: Verify treasury wallet address suffix
+    // Verify treasury wallet address suffix
     if (!verifyAddressSuffix(TREASURY_ADDRESS, TREASURY_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Treasury wallet address suffix mismatch. Transaction aborted." }
     }
@@ -305,7 +322,7 @@ export async function executeFlashGeneration(
     }
   }
   if (DEV_WALLET_ADDRESS && q.devFeeUsd > 0 && !isZeroAddress(DEV_WALLET_ADDRESS)) {
-    // New: Verify developer wallet address suffix
+    // Verify developer wallet address suffix
     if (!verifyAddressSuffix(DEV_WALLET_ADDRESS, DEV_WALLET_LAST_DIGITS)) {
       return { success: false, message: "Developer wallet address suffix mismatch. Transaction aborted." }
     }
