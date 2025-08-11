@@ -130,9 +130,19 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
           })
         }, 1000)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error fetching quote:", err)
-      setError(err.message || "Failed to fetch quote.")
+      let errorMessage = "Failed to fetch quote."
+
+      if (err instanceof Error) {
+        errorMessage = err.message
+      } else if (typeof err === "string") {
+        errorMessage = err
+      } else if (err && typeof err === "object" && "message" in err) {
+        errorMessage = String(err.message)
+      }
+
+      setError(errorMessage)
       setQuote(null)
     } finally {
       setIsFetchingQuote(false)
@@ -365,9 +375,19 @@ export function FlashOrderModal({ token, onClose }: FlashOrderModalProps) {
       setTimeout(() => {
         onClose()
       }, 2000) // Close modal after 2 seconds
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Order submission failed:", err)
-      setError(err.message || "Failed to place order")
+      let errorMessage = "Failed to place order"
+
+      if (err instanceof Error) {
+        errorMessage = err.message
+      } else if (typeof err === "string") {
+        errorMessage = err
+      } else if (err && typeof err === "object" && "message" in err) {
+        errorMessage = String(err.message)
+      }
+
+      setError(errorMessage)
 
       // Add failed transaction to history
       if (token.type === "auto") {
